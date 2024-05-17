@@ -33,8 +33,7 @@ int main(int argc, char* argv[]) {
 
 	matrix = allocate_matrix();
 
-	if (matrix == NULL)
-		return 1;
+	if (matrix == NULL) return 1;
 
 	fill_matrix(matrix);
 
@@ -84,8 +83,7 @@ void fill_matrix(int **m) {
 }
 
 void free_matrix(int **m) {
-	if (m == NULL)
-		return;
+	if (m == NULL) return;
 
 	for (int i = 0; i < MATRIX_HEIGHT; i++)
 		free(m[i]);
