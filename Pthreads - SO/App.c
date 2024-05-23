@@ -177,7 +177,7 @@ void free_matrix(int** m) {
 }
 
 int is_prime(int n) {
-	if (n % 2 == 0 && n != 2) return 0;
+	if (n % 2 == 0 && n != 2 || n < 2) return 0;
 	for (int i = 3, upper = sqrt(n); i <= upper; i += 2)
 		if (n % i == 0) return 0;
 	return 1;
