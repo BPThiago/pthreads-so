@@ -3,7 +3,6 @@
 #define _WINSOCK_DEPRECATED_NO_WARNINGS 1
 #pragma comment(lib,"pthreadVC2.lib")
 #define HAVE_STRUCT_TIMESPEC
-#define NUM_THREADS 2
 
 #include <pthread.h>
 #include <stdio.h>
@@ -11,41 +10,79 @@
 #include <math.h>
 #include <time.h>
 
-#define MIN(a,b) (((a)<(b))?(a):(b))
+#define NUM_THREADS 8
 #define MATRIX_WIDTH 10000
 #define MATRIX_HEIGHT 10000
-#define BLOCK_WIDTH 10
-#define BLOCK_HEIGHT 10
+#define BLOCK_WIDTH 100
+#define BLOCK_HEIGHT 100
+
+// Structs
+typedef struct {
+	int is_free;
+} Macroblock;
 
 // Global variables
 int** matrix;
-int total_primos = 0, pos_x = 0, pos_y = 0;
+Macroblock* macroblocks;
+int total_primos = 0, n_macroblocks = (MATRIX_HEIGHT * MATRIX_HEIGHT) / (BLOCK_HEIGHT * BLOCK_WIDTH);
 pthread_mutex_t primos_mutex;
 pthread_mutex_t pos_mutex;
 
 // Prototypes
-int **allocate_matrix();
-void fill_matrix(int **m);
-void free_matrix(int **m);
+Macroblock* allocate_macroblocks();
+void free_macroblocks(Macroblock* mac);
+int** allocate_matrix();
+void fill_matrix(int** m);
+void free_matrix(int** m);
 int is_prime(int n);
-void *runner(void *param);
+int serial_search();
+int parallel_search();
+void* runner(void* param);
+double get_time(time_t initial, time_t final);
 
 int main(int argc, char* argv[]) {
 	clock_t t_inicio, t_fim;
-	double tempo;
 
 	srand(42);
+
 	t_inicio = clock();
-
 	matrix = allocate_matrix();
-	
 	if (matrix == NULL) return 1;
-
 	fill_matrix(matrix);
+	t_fim = clock();
+	printf("Tempo para a geracao da matrix: %.3fs\n", get_time(t_inicio, t_fim));
 
-	/* PThreads Code <---<3 * "a. nucleos fisicos x nucleos logicos" */  
+	// Serial Search
+	t_inicio = clock();
+	serial_search();
+	t_fim = clock();
+	printf("Tempo para a busca serial: %.3fs (Primos encontrados: %d)\n", get_time(t_inicio, t_fim), total_primos);
+
+	// Parallel Search
+	total_primos = 0;
+	t_inicio = clock();
+	parallel_search();
+	t_fim = clock();
+	printf("Tempo para a busca paralela: %.3fs (Primos encontrados: %d)\n", get_time(t_inicio, t_fim), total_primos);
+
+	free_matrix(matrix);
+
+	return 0;
+}
+
+int serial_search() {
+	for (int i = 0; i < MATRIX_HEIGHT; i++)
+		for (int j = 0; j < MATRIX_WIDTH; j++)
+			if (is_prime(matrix[i][j])) total_primos++;
+}
+
+int parallel_search() {
 	pthread_t workers[NUM_THREADS];
-	pthread_attr_t attr; 
+	pthread_attr_t attr;
+
+	macroblocks = allocate_macroblocks();
+
+	if (macroblocks == NULL) return 1;
 
 	// Creation and initialization of mutex
 	pthread_mutex_init(&primos_mutex, NULL);
@@ -56,40 +93,34 @@ int main(int argc, char* argv[]) {
 
 	// Initialization of each thread
 	for (int i = 0; i < NUM_THREADS; i++) pthread_create(&workers[i], &attr, runner, NULL);
-	
+
 	for (int i = 0; i < NUM_THREADS; i++) pthread_join(workers[i], NULL);
 
-	printf("Total primos: %d\n", total_primos);
-
-	// Destruicao do mutex utilizado para liberacao de sua memoria
+	// Destruction of both mutex's to free the memory
 	pthread_mutex_destroy(&primos_mutex);
 	pthread_mutex_destroy(&pos_mutex);
 
-	free_matrix(matrix);
-	
-	t_fim = clock();
-	tempo = (double)(t_fim - t_inicio) / CLOCKS_PER_SEC;
-	printf("Tempo total: %f segundos.\n", tempo);
-
-	return 0;
+	free_macroblocks(macroblocks);
 }
 
 void* runner() {
-	int base_x, base_y, limit_x, limit_y, n_primos;
-	while (pos_y < MATRIX_HEIGHT) {
+	int n_primos, base, base_x, base_y, limit_x, limit_y, mac_pos = 0;
+	while (1) {
 		pthread_mutex_lock(&pos_mutex);
-		base_x = pos_x;
-		base_y = pos_y;
-		
-		if (base_x + BLOCK_WIDTH >= MATRIX_WIDTH) { 
-			pos_x = 0;
-			pos_y += BLOCK_HEIGHT;
-		}
-		else pos_x += BLOCK_WIDTH;
-		pthread_mutex_unlock(&pos_mutex);
+		while (mac_pos < n_macroblocks && macroblocks[mac_pos].is_free == 1) mac_pos++;
 
-		limit_x = MIN(base_x + BLOCK_WIDTH, MATRIX_WIDTH);
-		limit_y = MIN(base_y + BLOCK_HEIGHT, MATRIX_HEIGHT);
+		if (mac_pos >= n_macroblocks) {
+			pthread_mutex_unlock(&pos_mutex);
+			break;
+		}
+
+		macroblocks[mac_pos].is_free = 1;
+		pthread_mutex_unlock(&pos_mutex);
+		base_x = mac_pos * BLOCK_WIDTH % MATRIX_WIDTH;
+		base_y = (mac_pos * BLOCK_WIDTH) / MATRIX_WIDTH * BLOCK_WIDTH;
+
+		limit_x = base_x + BLOCK_WIDTH;
+		limit_y = base_y + BLOCK_HEIGHT;
 
 		n_primos = 0;
 		for (int i = base_y; i < limit_y; i++) {
@@ -106,13 +137,31 @@ void* runner() {
 	pthread_exit(0);
 }
 
-int **allocate_matrix() {
+Macroblock* allocate_macroblocks() {
+	Macroblock* mac = (Macroblock*)calloc(n_macroblocks, sizeof(Macroblock));
+
+	if (mac == NULL) {
+		printf("ERRO: MEMORIA INSUFICIENTE.");
+		return NULL;
+	}
+
+	for (int i = 0; i < n_macroblocks; i++)
+		mac[i].is_free = 0;
+
+	return mac;
+}
+
+void free_macroblocks(Macroblock* mac) {
+	free(mac);
+}
+
+int** allocate_matrix() {
 	if (MATRIX_HEIGHT < 1 || MATRIX_WIDTH < 1) {
 		printf("ERRO: LARGURA OU ALTURA INVALIDOS.");
 		return NULL;
 	}
 
-	int **m = (int**)calloc(MATRIX_HEIGHT, sizeof(int*));
+	int** m = (int**)calloc(MATRIX_HEIGHT, sizeof(int*));
 
 	if (m == NULL) {
 		printf("ERRO: MEMORIA INSUFICIENTE.");
@@ -130,13 +179,13 @@ int **allocate_matrix() {
 	return m;
 }
 
-void fill_matrix(int **m) {
+void fill_matrix(int** m) {
 	for (int i = 0; i < MATRIX_HEIGHT; i++)
 		for (int j = 0; j < MATRIX_WIDTH; j++)
 			m[i][j] = rand() % 32000;
 }
 
-void free_matrix(int **m) {
+void free_matrix(int** m) {
 	if (m == NULL) return;
 
 	for (int i = 0; i < MATRIX_HEIGHT; i++)
@@ -145,8 +194,12 @@ void free_matrix(int **m) {
 }
 
 int is_prime(int n) {
-	if (n % 2 == 0 && n != 2) return 0;
+	if (n % 2 == 0 && n != 2 || n < 2) return 0;
 	for (int i = 3, upper = sqrt(n); i <= upper; i += 2)
 		if (n % i == 0) return 0;
 	return 1;
+}
+
+double get_time(time_t initial, time_t final) {
+	return (double)(final - initial) / CLOCKS_PER_SEC;
 }
