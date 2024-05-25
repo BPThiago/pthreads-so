@@ -35,48 +35,21 @@ int** allocate_matrix();
 void fill_matrix(int** m);
 void free_matrix(int** m);
 int is_prime(int n);
-int serial_search();
-int parallel_search();
-void* runner(void* param);
-double get_time(time_t initial, time_t final);
+void *runner(void *param);
 
 int main(int argc, char* argv[]) {
 	clock_t t_inicio, t_fim;
 
 	srand(42);
 
-	t_inicio = clock();
 	matrix = allocate_matrix();
+	
 	if (matrix == NULL) return 1;
 	fill_matrix(matrix);
 	t_fim = clock();
 	printf("Tempo para a geracao da matrix: %.3fs\n", get_time(t_inicio, t_fim));
 
-	// Serial Search
-	t_inicio = clock();
-	serial_search();
-	t_fim = clock();
-	printf("Tempo para a busca serial: %.3fs (Primos encontrados: %d)\n", get_time(t_inicio, t_fim), total_primos);
-
-	// Parallel Search
-	total_primos = 0;
-	t_inicio = clock();
-	parallel_search();
-	t_fim = clock();
-	printf("Tempo para a busca paralela: %.3fs (Primos encontrados: %d)\n", get_time(t_inicio, t_fim), total_primos);
-
-	free_matrix(matrix);
-
-	return 0;
-}
-
-int serial_search() {
-	for (int i = 0; i < MATRIX_HEIGHT; i++)
-		for (int j = 0; j < MATRIX_WIDTH; j++)
-			if (is_prime(matrix[i][j])) total_primos++;
-}
-
-int parallel_search() {
+	/* PThreads Code <---<3 * "a. nucleos fisicos x nucleos logicos" */  
 	pthread_t workers[NUM_THREADS];
 	pthread_attr_t attr;
 
@@ -100,7 +73,13 @@ int parallel_search() {
 	pthread_mutex_destroy(&primos_mutex);
 	pthread_mutex_destroy(&pos_mutex);
 
-	free_macroblocks(macroblocks);
+	free_matrix(matrix);
+	
+	t_fim = clock();
+	tempo = (double)(t_fim - t_inicio) / CLOCKS_PER_SEC;
+	printf("Tempo total: %f segundos.\n", tempo);
+
+	return 0;
 }
 
 void* runner() {
